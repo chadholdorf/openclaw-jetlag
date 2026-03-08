@@ -1,13 +1,6 @@
 ---
 name: jetlag-planner
-description: >
-  Scans your Google Calendar for upcoming flights and writes a personalized
-  circadian adjustment plan back to your calendar. Trigger with phrases like
-  "check my flights", "run jetlag planner", "plan my trip adjustment", or
-  "am I ready for my upcoming flight".
-requires:
-  bins:
-    - node
+description: Scans your Google Calendar for upcoming flights and writes a personalized circadian adjustment plan back to your calendar. Trigger with phrases like "check my flights", "run jetlag planner", "plan my trip adjustment", or "am I ready for my upcoming flight".
 ---
 
 Run the jetlag planner by following these steps exactly.
