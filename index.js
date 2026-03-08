@@ -398,7 +398,67 @@ function generatePlan({ origin, destination, departure, arrival, delta }) {
   return events;
 }
 
+// ─── Flight Validation ───────────────────────────────────────────────────────
+
+/**
+ * Parses and validates raw flight events. Returns an array of flight objects
+ * ready for plan generation, logging skipped/unrecognized events along the way.
+ */
+function validateFlights(flightEvents) {
+  const valid = [];
+
+  for (const event of flightEvents) {
+    const { start: departure, end: arrival } = parseEventTime(event);
+    if (!departure.isValid || !arrival.isValid) {
+      console.log(`  ⚠️  Could not parse event time for: "${event.summary}" — skipping.`);
+      continue;
+    }
+
+    const route = parseRoute(event);
+    if (!route) {
+      console.log(`  ⚠️  Could not parse route from: "${event.summary}" — skipping.`);
+      continue;
+    }
+
+    const { origin, destination } = route;
+    const originTz = airportTz(origin);
+    const destTz = airportTz(destination);
+
+    if (!originTz || !destTz) {
+      console.log(`  ⚠️  Unknown airport code(s):${!originTz ? ' ' + origin : ''}${!destTz ? ' ' + destination : ''} — skipping.`);
+      continue;
+    }
+
+    const delta = Math.round(tzDeltaHours(originTz, destTz) * 2) / 2;
+
+    if (Math.abs(delta) < 2) {
+      console.log(`  ✈️  ${origin} → ${destination}  |  shift: ${delta > 0 ? '+' : ''}${delta}h  →  under 2 hours, no plan needed.`);
+      continue;
+    }
+
+    valid.push({ event, origin, destination, departure, arrival, delta });
+  }
+
+  return valid;
+}
+
 // ─── Google Calendar Helpers ─────────────────────────────────────────────────
+
+async function fetchExistingPlanEvents(calendar, timeMin, timeMax) {
+  try {
+    const res = await calendar.events.list({
+      calendarId: 'primary',
+      q: '✈️ JetLag Plan',
+      timeMin: timeMin.toISO(),
+      timeMax: timeMax.toISO(),
+      singleEvents: true,
+      maxResults: 10,
+    });
+    return res.data.items || [];
+  } catch {
+    return [];
+  }
+}
 
 async function fetchFlightEvents(calendar) {
   const now = DateTime.now().toISO();
@@ -512,41 +572,46 @@ async function main() {
 
   console.log(`Found ${flightEvents.length} potential flight event(s).\n`);
 
+  const flights = validateFlights(flightEvents);
+
+  if (flights.length === 0) {
+    console.log('\nNo plans were created. Possible reasons (see warnings above):');
+    console.log('  • Unrecognized airport code — add it to the AIRPORT_TZ map in index.js');
+    console.log('  • Timezone shift under 2 hours — short hops are intentionally skipped');
+    console.log('  • Route not parsed — event title needs a pattern like "SFO → JFK" or "SFO-JFK"\n');
+    return;
+  }
+
+  console.log('\nFlights ready for planning:');
+  for (const { origin, destination, departure, delta } of flights) {
+    const sign = delta > 0 ? '+' : '';
+    const { runwayDays } = planConfig(Math.abs(delta));
+    console.log(`  ✈️  ${origin} → ${destination}  |  shift: ${sign}${delta}h  |  departs: ${departure.toFormat('EEE MMM d, yyyy h:mm a ZZZZ')}  |  ${runwayDays}-day runway`);
+  }
+
+  console.log();
+  const answer = await promptLine('Proceed? Write these plans to Google Calendar? [y/N] ');
+  if (!['y', 'yes'].includes(answer.trim().toLowerCase())) {
+    console.log('Cancelled.');
+    return;
+  }
+
+  console.log();
   let plansCreated = 0;
 
-  for (const event of flightEvents) {
-    const { start: departure, end: arrival } = parseEventTime(event);
-    if (!departure.isValid || !arrival.isValid) {
-      console.log(`  ⚠️  Could not parse event time for: "${event.summary}" — skipping.`);
-      continue;
-    }
-    const route = parseRoute(event);
-
-    if (!route) {
-      console.log(`  ⚠️  Could not parse route from: "${event.summary}" — skipping.`);
-      continue;
-    }
-
-    const { origin, destination } = route;
-    const originTz = airportTz(origin);
-    const destTz = airportTz(destination);
-
-    if (!originTz || !destTz) {
-      console.log(`  ⚠️  Unknown airport code(s): ${!originTz ? origin : ''} ${!destTz ? destination : ''} — skipping.`);
-      continue;
-    }
-
-    const delta = Math.round(tzDeltaHours(originTz, destTz) * 2) / 2; // round to nearest 0.5h
+  for (const { origin, destination, departure, arrival, delta } of flights) {
     const absDelta = Math.abs(delta);
+    const { runwayDays } = planConfig(absDelta);
+    const planStart = departure.minus({ days: runwayDays });
+    const planEnd = arrival.plus({ days: 2 });
 
-    console.log(`  ✈️  ${origin} → ${destination}  |  shift: ${delta > 0 ? '+' : ''}${delta}h`);
-
-    if (absDelta < 2) {
-      console.log(`      Timezone difference is under 2 hours — no plan needed.\n`);
+    const existing = await fetchExistingPlanEvents(calendar, planStart, planEnd);
+    if (existing.length > 0) {
+      console.log(`  ⏭️  Plan already exists for ${origin} → ${destination} — skipping.`);
       continue;
     }
 
-    console.log(`      Generating ${planConfig(absDelta).runwayDays}-day adjustment plan...`);
+    console.log(`  ✈️  ${origin} → ${destination}  |  generating ${runwayDays}-day plan...`);
 
     const planEvents = generatePlan({ origin, destination, departure, arrival, delta });
 
@@ -556,7 +621,7 @@ async function main() {
 
     await createSummaryEvent(calendar, { origin, destination, departure, delta });
 
-    console.log(`      ✅ Created ${planEvents.length + 1} events for ${origin} → ${destination}\n`);
+    console.log(`      ✅ Created ${planEvents.length + 1} events.\n`);
     plansCreated++;
   }
 
@@ -564,10 +629,7 @@ async function main() {
     console.log(`\n🎉 Done! ${plansCreated} jetlag plan(s) added to your Google Calendar.`);
     console.log('   Open Google Calendar to review your adjustment schedule.\n');
   } else {
-    console.log('\nNo plans were created. Possible reasons (see warnings above):');
-    console.log('  • Unrecognized airport code — add it to the AIRPORT_TZ map in index.js');
-    console.log('  • Timezone shift under 2 hours — short hops are intentionally skipped');
-    console.log('  • Route not parsed — event title needs a pattern like "SFO → JFK" or "SFO-JFK"\n');
+    console.log('\nNo new plans written — all flights already had existing plans.');
   }
 }
 
