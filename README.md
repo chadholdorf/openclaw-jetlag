@@ -94,6 +94,16 @@ A browser window opens (or a URL is printed if the browser can't open automatica
 
 ---
 
+## Using as an OpenClaw Skill
+
+Symlink or copy `~/openclaw-jetlag` into your OpenClaw skills directory so Claw picks it up.
+
+**One-time prerequisite:** run `node index.js` manually once to complete the OAuth browser flow. Claw can't do that interactively — but once `.oauth-token.json` exists, it takes over from there.
+
+Then just message your bot: **"check my flights"** or **"run jetlag planner"**. Claw will run the planner and report back which flights were detected and how many calendar events were created.
+
+---
+
 ## How it works
 
 - Scans the next 90 days of your primary Google Calendar
