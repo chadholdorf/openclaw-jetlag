@@ -49,11 +49,16 @@ async function authorize() {
   }
 
   const authUrl = auth.generateAuthUrl({ access_type: 'offline', scope: SCOPES });
-  console.log('\nOpening browser for Google Calendar authorization...');
-  console.log('If browser does not open, visit:\n', authUrl, '\n');
-  await open(authUrl).catch(() => {});
-
-  const code = await promptLine('Paste the authorization code here: ');
+  console.log('\n► Open this URL in your browser:\n');
+  console.log('  ' + authUrl + '\n');
+  const opened = await open(authUrl).then(() => true).catch(() => false);
+  if (opened) {
+    console.log('(Browser window opened)');
+  } else {
+    console.log('(Could not open browser automatically — paste the URL above into your browser manually)');
+  }
+  console.log('\nAfter you click "Allow", Google will show you a short code.');
+  const code = await promptLine('Paste the code here and press Enter: ');
   const { tokens } = await auth.getToken(code.trim());
   fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens));
   auth.setCredentials(tokens);
@@ -64,6 +69,42 @@ async function authorize() {
 function promptLine(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => rl.question(question, (ans) => { rl.close(); resolve(ans); }));
+}
+
+function validateEnv() {
+  const nodeVersion = parseInt(process.version.slice(1).split('.')[0], 10);
+  if (nodeVersion < 18) {
+    console.error(`Node.js 18+ is required. You are running ${process.version}.`);
+    console.error('Download the latest version at https://nodejs.org');
+    process.exit(1);
+  }
+
+  if (!fs.existsSync('.env')) {
+    console.error('No .env file found.');
+    console.error('  Run:  cp .env.example .env');
+    console.error('  Then open .env and replace the placeholder values with your Google credentials.');
+    console.error('  See README.md steps 4–6 for how to get them.');
+    process.exit(1);
+  }
+
+  const PLACEHOLDERS = [
+    'your_client_id_here.apps.googleusercontent.com',
+    'your_client_secret_here',
+  ];
+  const { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } = process.env;
+
+  if (!GOOGLE_CLIENT_ID || PLACEHOLDERS.includes(GOOGLE_CLIENT_ID)) {
+    console.error('GOOGLE_CLIENT_ID is missing or still set to the placeholder value.');
+    console.error('  Open .env and replace it with your Client ID from Google Cloud Console.');
+    console.error('  See README.md step 6 for where to find it.');
+    process.exit(1);
+  }
+  if (!GOOGLE_CLIENT_SECRET || PLACEHOLDERS.includes(GOOGLE_CLIENT_SECRET)) {
+    console.error('GOOGLE_CLIENT_SECRET is missing or still set to the placeholder value.');
+    console.error('  Open .env and replace it with your Client Secret from Google Cloud Console.');
+    console.error('  See README.md step 6 for where to find it.');
+    process.exit(1);
+  }
 }
 
 // ─── Airport → Timezone Map ──────────────────────────────────────────────────
@@ -361,36 +402,58 @@ async function fetchFlightEvents(calendar) {
   const now = DateTime.now().toISO();
   const future = DateTime.now().plus({ days: 90 }).toISO();
 
-  const res = await calendar.events.list({
-    calendarId: 'primary',
-    timeMin: now,
-    timeMax: future,
-    singleEvents: true,
-    orderBy: 'startTime',
-    maxResults: 250,
-  });
+  let res;
+  try {
+    res = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: now,
+      timeMax: future,
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 250,
+    });
+  } catch (err) {
+    const status = err?.response?.status || err?.code;
+    if (status === 401 || status === 403) {
+      console.error('Auth error: your token may be expired or revoked.');
+      console.error('Delete .oauth-token.json and run again to re-authorize:');
+      console.error('  rm .oauth-token.json && node index.js');
+    } else {
+      console.error('Google Calendar API error:', err?.message || err);
+    }
+    process.exit(1);
+  }
 
   return (res.data.items || []).filter(isFlightEvent);
 }
 
 async function createCalendarEvent(calendar, spec, calendarId = 'primary') {
   const end = spec.start.plus({ minutes: spec.durationMins });
-  await calendar.events.insert({
-    calendarId,
-    resource: {
-      summary: spec.summary,
-      description: spec.description,
-      start: { dateTime: spec.start.toISO(), timeZone: spec.start.zoneName },
-      end: { dateTime: end.toISO(), timeZone: end.zoneName },
-      reminders: spec.reminderMins != null
-        ? {
-            useDefault: false,
-            overrides: [{ method: 'popup', minutes: spec.reminderMins }],
-          }
-        : { useDefault: true },
-      colorId: '10', // sage green — distinct from other events
-    },
-  });
+  try {
+    await calendar.events.insert({
+      calendarId,
+      resource: {
+        summary: spec.summary,
+        description: spec.description,
+        start: { dateTime: spec.start.toISO(), timeZone: spec.start.zoneName },
+        end: { dateTime: end.toISO(), timeZone: end.zoneName },
+        reminders: spec.reminderMins != null
+          ? {
+              useDefault: false,
+              overrides: [{ method: 'popup', minutes: spec.reminderMins }],
+            }
+          : { useDefault: true },
+        colorId: '10', // sage green — distinct from other events
+      },
+    });
+  } catch (err) {
+    const status = err?.response?.status || err?.code;
+    if (status === 401 || status === 403) {
+      console.error('\nAuth error writing to calendar. Delete .oauth-token.json and run again.');
+      process.exit(1);
+    }
+    console.error(`  ⚠️  Failed to create event "${spec.summary}": ${err?.message || err}`);
+  }
 }
 
 async function createSummaryEvent(calendar, { origin, destination, departure, delta }) {
@@ -431,6 +494,7 @@ async function createSummaryEvent(calendar, { origin, destination, departure, de
 async function main() {
   console.log('\n🛫  openclaw-jetlag — circadian planner\n');
 
+  validateEnv();
   const auth = await authorize();
   const calendar = google.calendar({ version: 'v3', auth });
 
@@ -438,7 +502,9 @@ async function main() {
   const flightEvents = await fetchFlightEvents(calendar);
 
   if (flightEvents.length === 0) {
-    console.log('No flight events found. Make sure airline confirmation emails are synced to Google Calendar.');
+    console.log('No flight events found in the next 90 days.');
+    console.log('Tip: Google Calendar auto-imports flights from Gmail. Make sure the Gmail account');
+    console.log('     linked to this calendar has received airline confirmation emails.');
     return;
   }
 
@@ -448,6 +514,10 @@ async function main() {
 
   for (const event of flightEvents) {
     const { start: departure, end: arrival } = parseEventTime(event);
+    if (!departure.isValid || !arrival.isValid) {
+      console.log(`  ⚠️  Could not parse event time for: "${event.summary}" — skipping.`);
+      continue;
+    }
     const route = parseRoute(event);
 
     if (!route) {
@@ -492,7 +562,10 @@ async function main() {
     console.log(`\n🎉 Done! ${plansCreated} jetlag plan(s) added to your Google Calendar.`);
     console.log('   Open Google Calendar to review your adjustment schedule.\n');
   } else {
-    console.log('\nNo plans were created. All detected flights either had unrecognized airports or < 2h timezone shifts.\n');
+    console.log('\nNo plans were created. Possible reasons (see warnings above):');
+    console.log('  • Unrecognized airport code — add it to the AIRPORT_TZ map in index.js');
+    console.log('  • Timezone shift under 2 hours — short hops are intentionally skipped');
+    console.log('  • Route not parsed — event title needs a pattern like "SFO → JFK" or "SFO-JFK"\n');
   }
 }
 
