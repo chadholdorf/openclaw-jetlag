@@ -198,12 +198,12 @@ function airportTz(code) {
 // ─── Flight Event Detection ──────────────────────────────────────────────────
 
 const AIRLINE_KEYWORDS = [
-  'united', 'delta', 'american airlines', 'southwest', 'alaska airlines',
-  'jetblue', 'spirit', 'frontier', 'hawaiian', 'sun country',
+  'united airlines', 'delta air', 'american airlines', 'southwest', 'alaska airlines',
+  'jetblue', 'spirit airlines', 'frontier', 'hawaiian', 'sun country',
   'air canada', 'lufthansa', 'british airways', 'air france', 'klm',
   'emirates', 'qatar', 'etihad', 'singapore airlines', 'cathay',
   'japan airlines', 'ana ', 'air india', 'turkish airlines',
-  'ryan', 'easyjet', 'wizz', 'iberia', 'tap ', 'swiss',
+  'ryanair', 'easyjet', 'wizz', 'iberia', 'tap ', 'swiss',
   'flight ', ' flight', 'departing', 'arrives ', 'boarding',
 ];
 
@@ -214,6 +214,8 @@ const FLIGHT_NUMBER_RE = /\b([A-Z]{2})\s?(\d{1,4})\b/;
 //   SFO → JFK  |  SFO-JFK  |  SFO to JFK  |  (SFO) ... (JFK)
 const ROUTE_RE = /\b([A-Z]{3})\s*(?:→|->|–|-|to)\s*([A-Z]{3})\b/i;
 const PARENS_ROUTE_RE = /\(([A-Z]{3})\).*?\(([A-Z]{3})\)/i;
+// Matches United's format: "Flight: SFO (UA2279) to SEA Confirmation PECRX5"
+const INLINE_FLIGHT_ROUTE_RE = /\b([A-Z]{3})\s+\([A-Z]{2}\d{1,4}\)\s+to\s+([A-Z]{3})\b/i;
 
 function isFlightEvent(event) {
   const text = `${event.summary || ''} ${event.description || ''}`.toLowerCase();
@@ -222,7 +224,7 @@ function isFlightEvent(event) {
 
 function parseRoute(event) {
   const text = `${event.summary || ''} ${event.description || ''}`;
-  const m = ROUTE_RE.exec(text) || PARENS_ROUTE_RE.exec(text);
+  const m = ROUTE_RE.exec(text) || PARENS_ROUTE_RE.exec(text) || INLINE_FLIGHT_ROUTE_RE.exec(text);
   if (m) return { origin: m[1].toUpperCase(), destination: m[2].toUpperCase() };
   return null;
 }
