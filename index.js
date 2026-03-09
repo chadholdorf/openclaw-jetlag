@@ -9,6 +9,7 @@
 import 'dotenv/config';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import readline from 'readline';
 import { google } from 'googleapis';
 import { DateTime } from 'luxon';
@@ -217,7 +218,7 @@ const PARENS_ROUTE_RE = /\(([A-Z]{3})\).*?\(([A-Z]{3})\)/i;
 // Matches United's format: "Flight: SFO (UA2279) to SEA Confirmation PECRX5"
 const INLINE_FLIGHT_ROUTE_RE = /\b([A-Z]{3})\s+\([A-Z]{2}\d{1,4}\)\s+to\s+([A-Z]{3})\b/i;
 
-function isFlightEvent(event) {
+export function isFlightEvent(event) {
   const text = `${event.summary || ''} ${event.description || ''}`.toLowerCase();
   return AIRLINE_KEYWORDS.some((kw) => text.includes(kw)) || FLIGHT_NUMBER_RE.test(event.summary || '');
 }
@@ -633,7 +634,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('\nFatal error:', err.message || err);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('\nFatal error:', err.message || err);
+    process.exit(1);
+  });
+}
