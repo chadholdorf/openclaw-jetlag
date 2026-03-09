@@ -123,6 +123,65 @@ Then just message your bot: **"check my flights"** or **"run jetlag planner"**. 
 
 ---
 
+## Supported Airlines
+
+Detection is keyword-based — the calendar event title must contain the airline name (case-insensitive) or a flight number in IATA format (e.g. `UA 1234`, `LH400`). Events auto-imported from Gmail confirmation emails usually satisfy this automatically.
+
+### US & Canada
+
+| Airline | Example event title match |
+|---|---|
+| United Airlines | `United Airlines flight SFO → ORD` |
+| Delta Air Lines | `Delta Air: JFK → LAX` |
+| American Airlines | `American Airlines AA 100` |
+| Southwest Airlines | `Southwest WN 1234 DAL → MDW` |
+| Alaska Airlines | `Alaska Airlines AS 7 SEA → JFK` |
+| JetBlue | `JetBlue B6 415 BOS → FLL` |
+| Spirit Airlines | `Spirit Airlines NK 42` |
+| Frontier Airlines | `Frontier F9 500 DEN → MCO` |
+| Hawaiian Airlines | `Hawaiian HA 50 HNL → LAX` |
+| Sun Country Airlines | `Sun Country SY 201 MSP → PHX` |
+| Air Canada | `Air Canada AC 759 YYZ → LHR` |
+
+### Europe
+
+| Airline | Example event title match |
+|---|---|
+| Lufthansa | `Lufthansa LH 400 FRA → JFK` |
+| British Airways | `British Airways BA 178 LHR → JFK` |
+| Air France | `Air France AF 11 CDG → LAX` |
+| KLM | `KLM KL 601 AMS → SFO` |
+| Ryanair | `Ryanair FR 123 DUB → BCN` |
+| easyJet | `easyJet U2 8542 LGW → AMS` |
+| Wizz Air | `Wizz W6 2137 BUD → LTN` |
+| Iberia | `Iberia IB 6253 MAD → JFK` |
+| TAP Air Portugal | `TAP TP 201 LIS → EWR` |
+| Swiss International | `Swiss LX 14 ZRH → JFK` |
+
+### Middle East & Asia
+
+| Airline | Example event title match |
+|---|---|
+| Emirates | `Emirates EK 201 DXB → JFK` |
+| Qatar Airways | `Qatar QR 701 DOH → LAX` |
+| Etihad Airways | `Etihad EY 101 AUH → LHR` |
+| Singapore Airlines | `Singapore Airlines SQ 37 SIN → LAX` |
+| Cathay Pacific | `Cathay CX 880 HKG → JFK` |
+| Japan Airlines | `Japan Airlines JL 6 NRT → ORD` |
+| All Nippon Airways (ANA) | `ANA NH 8 HND → LAX` |
+| Air India | `Air India AI 101 DEL → JFK` |
+| Turkish Airlines | `Turkish Airlines TK 1 IST → JFK` |
+
+### IATA fallback
+
+Any event containing a valid IATA airline code + flight number (e.g. `LX 14`, `EK201`) will be detected even if the airline name isn't listed above. This means most airlines worldwide work out of the box as long as the flight number appears in the event title.
+
+### Adding an airline
+
+If your airline isn't detected, either rename the calendar event to include the airline name and route, or add the airline's name as a string to the `AIRLINE_KEYWORDS` array near the top of `index.js`.
+
+---
+
 ## Troubleshooting
 
 **Flight not detected**
